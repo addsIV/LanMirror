@@ -1,0 +1,154 @@
+<!doctype html><meta charset="utf-8"><title>LanMirror – 分享端</title>
+<style>
+body{font:15px -apple-system,system-ui;margin:0;padding:24px;background:#111;color:#eee}
+button,select{font:inherit;padding:10px 18px;border:0;border-radius:8px;cursor:pointer;background:#3b82f6;color:#fff}
+select{background:#333}
+button.stop{background:#ef4444} button:disabled{opacity:.4}
+#viewers div{background:#222;padding:10px 14px;border-radius:8px;margin:8px 0;display:flex;gap:12px;align-items:center}
+.ok{color:#4ade80}.wait{color:#fbbf24}
+video{width:320px;border-radius:8px;margin-top:16px;background:#000}
+code{background:#222;padding:2px 6px;border-radius:4px}
+label{margin-right:12px}
+</style>
+<h2>LanMirror 分享端</h2>
+<p>PC 用瀏覽器打開：<code id="url"></code></p>
+<p>
+  <label>解析度 <select id="res"><option value="native">原生（Retina 實體像素）</option><option value="logical">邏輯像素（省 CPU）</option></select></label>
+  <label>FPS <select id="fps"><option>30</option><option>60</option></select></label>
+  <label>最高位元率 <select id="br"><option value="20">20 Mbps</option><option value="40" selected>40 Mbps</option><option value="80">80 Mbps</option></select></label>
+</p>
+<p><button id="start">選擇要分享的畫面</button> <button id="stop" class="stop" disabled>停止分享</button>
+   <button id="refresh" style="background:#555">↻ 重新整理清單</button> <span id="conn" class="wait">連線中…</span></p>
+<div id="viewers"></div>
+<video id="preview" autoplay muted playsinline></video>
+<script>
+const $ = s => document.querySelector(s);
+const peers = new Map(); // viewerId -> {pc, el, allowed}
+let stream = null;
+let ws = null;
+
+const wsSend = m => ws?.readyState === 1 && ws.send(JSON.stringify(m));
+function connectWs() {
+  ws = new WebSocket(`ws://${location.host}`);
+  ws.onopen = () => { setConn('已連線', 'ok'); wsSend({ type: 'hello-sender' }); };
+  ws.onmessage = onMessage;
+  ws.onclose = () => { setConn('與伺服器斷線，3 秒後重連…', 'wait'); setTimeout(connectWs, 3000); };
+}
+function setConn(t, cls) { $('#conn').textContent = t; $('#conn').className = cls; }
+connectWs();
+
+// 重新整理：ws 斷了就立刻重連，否則向 server 要最新清單並比對
+$('#refresh').onclick = () => {
+  if (ws?.readyState !== 1) { ws?.close(); return connectWs(); }
+  wsSend({ type: 'list-viewers' });
+};
+function reconcile(list) {
+  const ids = new Set(list.map(v => v.id));
+  for (const [id, p] of peers) if (!ids.has(id)) { p.pc?.close(); p.el.remove(); peers.delete(id); }
+  for (const v of list) if (!peers.has(v.id)) peers.set(v.id, { el: row(v.id, v.ip), pc: null, allowed: false });
+}
+fetch('/hostinfo').then(r => r.json()).then(({ ips, port }) => {
+  $('#url').textContent = ips.map(ip => `http://${ip}:${port}`).join('  或  ');
+});
+
+const maxBps = () => Number($('#br').value) * 1_000_000;
+
+$('#start').onclick = async () => {
+  const dpr = $('#res').value === 'native' ? devicePixelRatio : 1;
+  const fps = Number($('#fps').value);
+  stream = await navigator.mediaDevices.getDisplayMedia({
+    video: {
+      frameRate: { ideal: fps, max: fps },
+      width: { ideal: Math.round(screen.width * dpr) },
+      height: { ideal: Math.round(screen.height * dpr) },
+    },
+    audio: true,
+  });
+  const vt = stream.getVideoTracks()[0];
+  vt.contentHint = 'detail';         // 文字清晰優先，遇到頻寬不足降 fps 而不是降解析度
+  vt.onended = stopAll;
+  $('#preview').srcObject = stream;
+  console.log('capture', vt.getSettings());
+  $('#start').disabled = true; $('#stop').disabled = false;
+  for (const [id, p] of peers) if (p.allowed && !p.pc) connect(id);
+};
+$('#stop').onclick = stopAll;
+
+function stopAll() {
+  stream?.getTracks().forEach(t => t.stop()); stream = null;
+  $('#preview').srcObject = null;
+  for (const [id, p] of peers) { p.pc?.close(); p.pc = null; setStatus(id, '已停止', 'wait'); }
+  $('#start').disabled = false; $('#stop').disabled = true;
+}
+
+function row(id, ip) {
+  const el = document.createElement('div');
+  el.innerHTML = `<b>Viewer #${id}</b> <span>${ip}</span> <span class="st wait">等待允許</span>
+    <button data-a="allow">允許</button> <button data-a="deny" class="stop">拒絕</button>`;
+  el.onclick = e => {
+    const a = e.target.dataset.a; if (!a) return;
+    if (a === 'allow') { peers.get(id).allowed = true; el.querySelectorAll('button').forEach(b => b.remove());
+      if (stream) connect(id); else setStatus(id, '已允許，請先選擇畫面', 'wait'); }
+    else { wsSend({ type: 'deny', to: id }); el.remove(); peers.delete(id); }
+  };
+  $('#viewers').appendChild(el);
+  return el;
+}
+function setStatus(id, text, cls) { const s = peers.get(id)?.el.querySelector('.st'); if (s) { s.textContent = text; s.className = 'st ' + cls; } }
+
+// 優先 VP9（螢幕內容壓縮效率好），其次 H264、VP8
+function preferCodecs(transceiver) {
+  const caps = RTCRtpSender.getCapabilities?.('video'); if (!caps) return;
+  const rank = c => ['video/VP9', 'video/H264', 'video/VP8'].indexOf(c.mimeType);
+  const codecs = caps.codecs.filter(c => rank(c) >= 0 || /rtx|red|ulpfec/i.test(c.mimeType))
+    .sort((a, b) => (rank(a) < 0 ? 9 : rank(a)) - (rank(b) < 0 ? 9 : rank(b)));
+  try { transceiver.setCodecPreferences(codecs); } catch (e) { console.warn('codec pref', e); }
+}
+
+// 在對方的 SDP 裡塞起始/上限位元率，Chrome 才會一開始就用高位元率，不用慢慢爬
+function mungeBitrate(sdp, kbps) {
+  const lines = sdp.split('\r\n'); let inVideo = false; const out = [];
+  for (const l of lines) {
+    if (l.startsWith('m=')) inVideo = l.startsWith('m=video');
+    if (inVideo && l.startsWith('a=fmtp:') && !l.includes('apt=')) {
+      out.push(`${l};x-google-start-bitrate=${Math.round(kbps / 4)};x-google-min-bitrate=2000;x-google-max-bitrate=${kbps}`);
+      continue;
+    }
+    out.push(l);
+    if (inVideo && l.startsWith('c=')) out.push(`b=AS:${kbps}`);
+  }
+  return out.join('\r\n');
+}
+
+async function connect(id) {
+  const p = peers.get(id);
+  const pc = new RTCPeerConnection({ iceServers: [] }); // 純區網，不需要 STUN
+  p.pc = pc;
+  const tx = pc.addTransceiver(stream.getVideoTracks()[0], {
+    direction: 'sendonly', streams: [stream],
+    sendEncodings: [{ maxBitrate: maxBps(), maxFramerate: Number($('#fps').value), scaleResolutionDownBy: 1 }],
+  });
+  preferCodecs(tx);
+  try { const prm = tx.sender.getParameters(); prm.degradationPreference = 'maintain-resolution'; await tx.sender.setParameters(prm); } catch (e) { console.warn(e); }
+  for (const t of stream.getAudioTracks()) pc.addTrack(t, stream);
+
+  pc.onicecandidate = e => e.candidate && wsSend({ type: 'ice', to: id, candidate: e.candidate });
+  pc.onconnectionstatechange = () => setStatus(id, pc.connectionState, pc.connectionState === 'connected' ? 'ok' : 'wait');
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  wsSend({ type: 'offer', to: id, sdp: offer });
+}
+
+async function onMessage({ data }) {
+  const m = JSON.parse(data);
+  if (m.type === 'viewer-list') { reconcile(m.viewers); setConn('已連線', 'ok'); }
+  if (m.type === 'viewer-joined') { if (!peers.has(m.id)) peers.set(m.id, { el: row(m.id, m.ip), pc: null, allowed: false }); }
+  if (m.type === 'sender-replaced') { stopAll(); for (const [id] of peers) setStatus(id, '已被另一個分享頁接管', 'wait'); setConn('另一個分享頁已接管，按「重新整理清單」可搶回', 'wait'); }
+  if (m.type === 'viewer-left') { const p = peers.get(m.id); p?.pc?.close(); p?.el.remove(); peers.delete(m.id); }
+  if (m.type === 'answer') {
+    const pc = peers.get(m.from)?.pc; if (!pc) return;
+    await pc.setRemoteDescription({ type: 'answer', sdp: mungeBitrate(m.sdp.sdp, maxBps() / 1000) });
+  }
+  if (m.type === 'ice') await peers.get(m.from)?.pc?.addIceCandidate(m.candidate).catch(()=>{});
+}
+</script>

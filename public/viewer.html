@@ -1,0 +1,60 @@
+<!doctype html><meta charset="utf-8"><title>LanMirror</title>
+<style>
+html,body{height:100%;margin:0;background:#000;color:#ccc;font:16px system-ui}
+#msg{position:fixed;inset:0;display:grid;place-items:center;text-align:center}
+video{width:100vw;height:100vh;object-fit:contain;display:none}
+#stats{position:fixed;top:8px;left:8px;background:rgba(0,0,0,.7);color:#0f0;font:12px monospace;padding:6px 8px;border-radius:6px;display:none;white-space:pre}
+</style>
+<div id="msg">連線中…</div>
+<video id="v" autoplay playsinline muted></video>
+<div id="stats"></div>
+<script>
+const $ = s => document.querySelector(s);
+const ws = new WebSocket(`ws://${location.host}`);
+const wsSend = m => ws.readyState === 1 && ws.send(JSON.stringify(m));
+let pc = null;
+const say = t => { $('#msg').innerHTML = t; $('#msg').style.display = 'grid'; $('#v').style.display = 'none'; };
+
+ws.onopen = () => wsSend({ type: 'hello-viewer' });
+ws.onclose = () => say('與伺服器斷線，請重新整理');
+ws.onmessage = async ({ data }) => {
+  const m = JSON.parse(data);
+  if (m.type === 'welcome') say(m.hasSender ? '等待 Mac 端允許…' : 'Mac 端還沒開啟分享頁面');
+  if (m.type === 'deny') { pc?.close(); pc = null; say('Mac 端拒絕了連線'); }
+  if (m.type === 'sender-left') { pc?.close(); say('Mac 端已離開'); }
+  if (m.type === 'offer') {
+    pc?.close();
+    pc = new RTCPeerConnection({ iceServers: [] });
+    pc.ontrack = e => {
+      $('#v').srcObject = e.streams[0];
+      $('#msg').style.display = 'none'; $('#v').style.display = 'block';
+      $('#v').onclick = () => { $('#v').muted = false; }; // 點一下解除靜音
+    };
+    pc.onicecandidate = e => e.candidate && wsSend({ type: 'ice', candidate: e.candidate });
+    pc.onconnectionstatechange = () => { if (['failed','disconnected'].includes(pc.connectionState)) say('連線中斷：' + pc.connectionState); };
+    await pc.setRemoteDescription(m.sdp);
+    const ans = await pc.createAnswer();
+    await pc.setLocalDescription(ans);
+    wsSend({ type: 'answer', sdp: ans });
+  }
+  if (m.type === 'ice') await pc?.addIceCandidate(m.candidate).catch(()=>{});
+};
+document.ondblclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+
+// 按 i 顯示/隱藏統計：解析度、fps、位元率、編碼器
+let lastBytes = 0, lastTs = 0;
+document.onkeydown = e => { if (e.key === 'i') $('#stats').style.display = $('#stats').style.display === 'block' ? 'none' : 'block'; };
+setInterval(async () => {
+  if (!pc || $('#stats').style.display !== 'block') return;
+  const st = await pc.getStats(); let s = '';
+  st.forEach(r => {
+    if (r.type === 'inbound-rtp' && r.kind === 'video') {
+      const mbps = lastTs ? ((r.bytesReceived - lastBytes) * 8 / ((r.timestamp - lastTs) / 1000) / 1e6).toFixed(1) : '-';
+      lastBytes = r.bytesReceived; lastTs = r.timestamp;
+      const codec = st.get(r.codecId)?.mimeType || '';
+      s += `${r.frameWidth}x${r.frameHeight} @ ${r.framesPerSecond || 0} fps\n${mbps} Mbps  ${codec}\ndropped ${r.framesDropped || 0}  jitter ${(r.jitterBufferDelay / (r.jitterBufferEmittedCount || 1) * 1000).toFixed(0)} ms`;
+    }
+  });
+  $('#stats').textContent = s;
+}, 1000);
+</script>

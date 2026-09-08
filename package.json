@@ -1,0 +1,68 @@
+{
+  "name": "lanmirror",
+  "version": "1.0.0",
+  "description": "區網螢幕鏡像：Mac 畫面投到 PC 瀏覽器",
+  "main": "main.js",
+  "scripts": {
+    "start": "node server.js",
+    "app": "electron .",
+    "dist": "electron-builder --mac dmg"
+  },
+  "keywords": [],
+  "author": "Kevin",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "electron": "^44.2.0",
+    "electron-builder": "^26.15.3"
+  },
+  "productName": "LanMirror",
+  "build": {
+    "appId": "com.kevin.lanmirror",
+    "productName": "LanMirror",
+    "files": [
+      "main.js",
+      "server.js",
+      "public/**",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "identity": null,
+      "extendInfo": {
+        "NSCameraUsageDescription": "不使用相機",
+        "NSMicrophoneUsageDescription": "分享畫面時擷取聲音"
+      },
+      "icon": "build/icon.icns"
+    },
+    "dmg": {
+      "title": "LanMirror",
+      "contents": [
+        {
+          "x": 130,
+          "y": 170,
+          "type": "file"
+        },
+        {
+          "x": 410,
+          "y": 170,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "afterAllArtifactBuild": "build/set-dmg-icon.js",
+    "afterPack": "build/adhoc-sign.js"
+  }
+}
