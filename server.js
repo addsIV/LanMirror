@@ -6,7 +6,17 @@ const os = require('os');
 const { WebSocketServer } = require('ws');
 const { exec } = require('child_process');
 
-const PORT = Number(process.env.PORT) || 3131;
+const argv = process.argv.slice(2);
+const argValue = name => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
+const PORT = Number(argValue('--port') || process.env.PORT) || 3131;
+
+// 跨平台開瀏覽器：macOS open / Windows start / Linux xdg-open
+function openBrowser(url) {
+  const cmd = process.platform === 'darwin' ? `open "${url}"`
+    : process.platform === 'win32' ? `start "" "${url}"`
+    : `xdg-open "${url}"`;
+  exec(cmd, err => err && console.log(`（自動開瀏覽器失敗，請手動開 ${url}）`));
+}
 const PUB = path.join(__dirname, 'public');
 const lanIps = Object.values(os.networkInterfaces()).flat()
   .filter(i => i.family === 'IPv4' && !i.internal).map(i => i.address);
@@ -78,15 +88,15 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-function start({ openBrowser = true } = {}) {
+function start({ openBrowser: autoOpen = true } = {}) {
   return new Promise(resolve => server.listen(PORT, () => {
     console.log(`LanMirror 啟動`);
-    console.log(`  Mac 端（分享畫面）: http://localhost:${PORT}/sender`);
-    for (const ip of lanIps) console.log(`  PC 端（觀看）:       http://${ip}:${PORT}`);
-    if (openBrowser && process.platform === 'darwin') exec(`open http://localhost:${PORT}/sender`);
+    console.log(`  分享端（這台電腦）: http://localhost:${PORT}/sender`);
+    for (const ip of lanIps) console.log(`  觀看端（其他裝置）: http://${ip}:${PORT}`);
+    if (autoOpen) openBrowser(`http://localhost:${PORT}/sender`);
     resolve({ port: PORT, lanIps });
   }));
 }
 
 module.exports = { start, PORT, lanIps };
-if (require.main === module) start({ openBrowser: !process.env.NO_OPEN });
+if (require.main === module) start({ openBrowser: !process.env.NO_OPEN && !argv.includes('--no-open') });
