@@ -8,10 +8,13 @@ button.stop{background:#ef4444} button:disabled{opacity:.4}
 .ok{color:#4ade80}.wait{color:#fbbf24}
 video{width:320px;border-radius:8px;margin-top:16px;background:#000}
 code{background:#222;padding:2px 6px;border-radius:4px}
+#urls{display:inline-flex;flex-wrap:wrap;gap:8px 14px;vertical-align:middle}
+#urls span{display:inline-flex;align-items:center;gap:6px}
+button.copy{padding:4px 10px;font-size:13px;background:#333} button.copy.done{background:#16a34a}
 label{margin-right:12px}
 </style>
 <h2>LanMirror 分享端</h2>
-<p>PC 用瀏覽器打開：<code id="url"></code></p>
+<p>PC 用瀏覽器打開：<span id="urls"></span></p>
 <p>
   <label>解析度 <select id="res"><option value="native">原生（Retina 實體像素）</option><option value="logical">邏輯像素（省 CPU）</option></select></label>
   <label>FPS <select id="fps"><option>30</option><option>60</option></select></label>
@@ -48,7 +51,22 @@ function reconcile(list) {
   for (const v of list) if (!peers.has(v.id)) peers.set(v.id, { el: row(v.id, v.ip), pc: null, allowed: false });
 }
 fetch('/hostinfo').then(r => r.json()).then(({ ips, port }) => {
-  $('#url').textContent = ips.map(ip => `http://${ip}:${port}`).join('  或  ');
+  for (const ip of ips) {
+    const url = `http://${ip}:${port}`;
+    const item = document.createElement('span');
+    item.innerHTML = '<code></code><button class="copy">複製</button>';
+    item.querySelector('code').textContent = url;
+    const btn = item.querySelector('button');
+    btn.onclick = async () => {
+      try { await navigator.clipboard.writeText(url); }
+      catch { // 不是安全來源或被拒時退回舊招
+        const ta = document.createElement('textarea'); ta.value = url; document.body.append(ta); ta.select(); document.execCommand('copy'); ta.remove();
+      }
+      btn.textContent = '已複製'; btn.classList.add('done');
+      setTimeout(() => { btn.textContent = '複製'; btn.classList.remove('done'); }, 1500);
+    };
+    $('#urls').append(item);
+  }
 });
 
 const maxBps = () => Number($('#br').value) * 1_000_000;
