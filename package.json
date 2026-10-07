@@ -1,12 +1,15 @@
 {
   "name": "lanmirror",
   "version": "1.0.0",
-  "description": "區網螢幕鏡像：Mac 畫面投到 PC 瀏覽器",
+  "description": "區網螢幕鏡像：電腦畫面投到任何瀏覽器",
   "main": "main.js",
   "scripts": {
     "start": "node server.js",
     "app": "electron .",
-    "dist": "electron-builder --mac dmg"
+    "icons": "node build/make-ico.js",
+    "dist": "electron-builder --mac dmg",
+    "dist:win": "electron-builder --win",
+    "dist:all": "electron-builder --mac dmg --win"
   },
   "keywords": [],
   "author": "Kevin",
@@ -25,6 +28,7 @@
     "productName": "LanMirror",
     "files": [
       "main.js",
+      "preload.js",
       "server.js",
       "public/**",
       "package.json"
@@ -63,6 +67,32 @@
       ]
     },
     "afterAllArtifactBuild": "build/set-dmg-icon.js",
-    "afterPack": "build/adhoc-sign.js"
+    "afterPack": "build/adhoc-sign.js",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "shortcutName": "LanMirror"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.${ext}"
+    }
   }
 }

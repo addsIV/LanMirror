@@ -56,14 +56,16 @@ const maxBps = () => Number($('#br').value) * 1_000_000;
 $('#start').onclick = async () => {
   const dpr = $('#res').value === 'native' ? devicePixelRatio : 1;
   const fps = Number($('#fps').value);
-  stream = await navigator.mediaDevices.getDisplayMedia({
-    video: {
-      frameRate: { ideal: fps, max: fps },
-      width: { ideal: Math.round(screen.width * dpr) },
-      height: { ideal: Math.round(screen.height * dpr) },
-    },
-    audio: true,
-  });
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: {
+        frameRate: { ideal: fps, max: fps },
+        width: { ideal: Math.round(screen.width * dpr) },
+        height: { ideal: Math.round(screen.height * dpr) },
+      },
+      audio: true,
+    });
+  } catch (e) { console.log('未選擇畫面', e.name); return; } // 使用者在選擇器按了取消
   const vt = stream.getVideoTracks()[0];
   vt.contentHint = 'detail';         // 文字清晰優先，遇到頻寬不足降 fps 而不是降解析度
   vt.onended = stopAll;

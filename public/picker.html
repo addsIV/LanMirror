@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><title>選擇要分享的畫面</title>
+<style>
+  body { margin:0; background:#111; color:#ddd; font:14px/1.4 -apple-system, "Segoe UI", sans-serif; display:flex; flex-direction:column; height:100vh; }
+  header { padding:12px 16px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #2a2a2a; }
+  .tabs button { background:none; border:none; color:#888; padding:6px 12px; cursor:pointer; font-size:14px; border-bottom:2px solid transparent; }
+  .tabs button.on { color:#fff; border-color:#4a9eff; }
+  main { flex:1; overflow:auto; padding:16px; display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:12px; align-content:start; }
+  .src { background:#1b1b1b; border:2px solid transparent; border-radius:8px; padding:8px; cursor:pointer; text-align:center; }
+  .src:hover { border-color:#4a9eff; }
+  .src img { width:100%; aspect-ratio:16/10; object-fit:contain; background:#000; border-radius:4px; }
+  .src div { margin-top:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:13px; }
+  footer { padding:10px 16px; border-top:1px solid #2a2a2a; text-align:right; }
+  footer button { background:#333; color:#ddd; border:none; border-radius:6px; padding:8px 16px; cursor:pointer; }
+  .empty { color:#666; grid-column:1/-1; text-align:center; padding:40px; }
+</style></head>
+<body>
+<header><strong>選擇要分享的畫面</strong>
+  <span class="tabs"><button id="t-screen" class="on">整個螢幕</button><button id="t-window">視窗</button></span>
+</header>
+<main id="list"><div class="empty">載入中…</div></main>
+<footer><button id="cancel">取消</button></footer>
+<script>
+  let all = [], kind = 'screen';
+  const list = document.getElementById('list');
+  function render() {
+    const items = all.filter(s => s.kind === kind);
+    list.innerHTML = items.length ? '' : '<div class="empty">沒有可分享的來源</div>';
+    for (const s of items) {
+      const el = document.createElement('div'); el.className = 'src';
+      el.innerHTML = `<img src="${s.thumb}" alt=""><div title="${s.name.replace(/"/g,'&quot;')}">${s.name}</div>`;
+      el.onclick = () => picker.choose(s.id);
+      list.appendChild(el);
+    }
+  }
+  picker.onSources(sources => { all = sources; render(); });
+  for (const k of ['screen', 'window']) document.getElementById('t-' + k).onclick = e => {
+    kind = k; document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('on', b === e.target)); render();
+  };
+  document.getElementById('cancel').onclick = () => picker.choose(null);
+  addEventListener('keydown', e => e.key === 'Escape' && picker.choose(null));
+</script>
+</body></html>
